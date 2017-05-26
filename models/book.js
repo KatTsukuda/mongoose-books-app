@@ -5,7 +5,10 @@ var Schema = mongoose.Schema;
 // create Schema and Model for Books
 var BookSchema = new mongoose.Schema({
   title: String,
-  author: String,
+  author: {
+      type: Schema.Types.ObjectId,
+      ref: 'Author'
+  }
   image: String,
   release_date: String
 });
