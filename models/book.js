@@ -8,7 +8,7 @@ var BookSchema = new mongoose.Schema({
   author: {
       type: Schema.Types.ObjectId,
       ref: 'Author'
-  }
+  },
   image: String,
   release_date: String
 });
