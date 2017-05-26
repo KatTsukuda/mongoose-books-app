@@ -10,6 +10,7 @@
 var express = require('express'),
   bodyParser = require('body-parser');
 
+// connect to db models
 var db = require('./models');
 
 // generate a new express app and call it 'app'
@@ -20,19 +21,6 @@ app.use(express.static('public'));
 
 // body parser config to accept our datatypes
 app.use(bodyParser.urlencoded({ extended: true }));
-
-
-
-////////////////////
-//  DATA
-///////////////////
-
-
-
-
-
-
-
 
 
 ////////////////////
@@ -50,37 +38,18 @@ app.get('/', function (req, res) {
 // get all books
 app.get('/api/books', function (req, res) {
   // send all books as JSON response
-  db.Book.find(function(err,books) {
-      if (err) {
-          console.log('index error: ' + err);
-          res.sendStatus(500);
-      }
+  db.Book.find().populate('author')
+    .exec(function(err, books) {
+      if (err) { return console.log("index error: " + err); }
       res.json(books);
   });
 });
 
 // get one book
 app.get('/api/books/:id', function (req, res) {
-  // find one book by its id
-  console.log('books show', req.params);
-  for(var i=0; i < books.length; i++) {
-    if (books[i]._id === req.params.id) {
-      res.json(books[i]);
-      break; // we found the right book, we can stop searching
-    }
-  }
-});
-
-// get all books
-app.get('/api/books', function (req, res) {
-  // send all books as JSON response
-  db.Book.find()
-    // populate fills in the author id with all the author data
-    .populate('author')
-    .exec(function(err, books){
-      if (err) { return console.log("index error: " + err); }
-      res.json(books);
-    });
+  db.Book.findOne({_id: req.params.id }, function(err, data) {
+    res.json(data);
+  });
 });
 
 // create new book
@@ -91,35 +60,35 @@ app.post('/api/books', function (req, res) {
     image: req.body.image,
     releaseDate: req.body.releaseDate,
   });
-
-  // this code will only add an author to a book if the author already exists
+  // find the author from req.body
   db.Author.findOne({name: req.body.author}, function(err, author){
-    newBook.author = author;
-    // add newBook to database
-    newBook.save(function(err, book){
-      if (err) {
-        return console.log("create error: " + err);
-      }
-      console.log("created ", book.title);
-      res.json(book);
-    });
+    if (err) {
+      return console.log(err);
+    }
+    // if that author doesn't exist yet, create a new one
+    if (author === null) {
+      db.Author.create({name:req.body.author, alive:true}, function(err, newAuthor) {
+        createBookWithAuthorAndRespondTo(newBook, newAuthor, res);
+      });
+    } else {
+      createBookWithAuthorAndRespondTo(newBook, author, res);
+    }
   });
+});
 
-});
-// update book
-app.put('/api/books/:id', function(req,res){
-// get book id from url params (`req.params`)
-  console.log('books update', req.params);
-  var bookId = req.params.id;
-  // find the index of the book we want to remove
-  var updateBookIndex = books.findIndex(function(element, index) {
-    return (element._id === parseInt(req.params.id)); //params are strings
+function createBookWithAuthorAndRespondTo(book, author, res) {
+  // add this author to the book
+  book.author = author;
+  // save newBook to database
+  book.save(function(err, book){
+    if (err) {
+      return console.log("save error: " + err);
+    }
+    console.log("saved ", book.title);
+    // send back the book!
+    res.json(book);
   });
-  console.log('updating book with index', deleteBookIndex);
-  var bookToUpdate = books[deleteBookIndex];
-  books.splice(updateBookIndex, 1, req.params);
-  res.json(req.params);
-});
+}
 
 // delete book
 app.delete('/api/books/:id', function (req, res) {
@@ -127,19 +96,65 @@ app.delete('/api/books/:id', function (req, res) {
   console.log('books delete', req.params);
   var bookId = req.params.id;
   // find the index of the book we want to remove
-  var deleteBookIndex = books.findIndex(function(element, index) {
-    return (element._id === parseInt(req.params.id)); //params are strings
+  db.Book.findOneAndRemove({ _id: bookId })
+    .populate('author')
+    .exec(function (err, deletedBook) {
+      res.json(deletedBook);
   });
-  console.log('deleting book with index', deleteBookIndex);
-  var bookToDelete = books[deleteBookIndex];
-  books.splice(deleteBookIndex, 1);
-  res.json(bookToDelete);
+});
+
+
+// Create a character associated with a book
+app.post('/api/books/:book_id/characters', function (req, res) {
+  // Get book id from url params (`req.params`)
+  var bookId = req.params.book_id;
+  db.Book.findById(bookId)
+    .populate('author')
+    .exec(function(err, foundBook) {
+      console.log(foundBook);
+      if (err) {
+        res.status(500).json({error: err.message});
+      } else if (foundBook === null) {
+        // Is this the same as checking if the foundBook is undefined?
+        res.status(404).json({error: "No Book found by this ID"});
+      } else {
+        // push character into characters array
+        foundBook.characters.push(req.body);
+        // save the book with the new character
+        foundBook.save();
+        res.status(201).json(foundBook);
+      }
+    });
+});
+
+
+// Delete a character associated with a book
+app.delete('/api/books/:book_id/characters/:character_id', function (req, res) {
+  // Get book id from url params (`req.params`)
+  var bookId = req.params.book_id;
+  var characterId = req.params.character_id;
+  db.Book.findById(bookId)
+    .populate('author')
+    .exec(function(err, foundBook) {
+      if (err) {
+        res.status(500).json({error: err.message});
+      } else if (foundBook === null) {
+        res.status(404).json({error: "No Book found by this ID"});
+      } else {
+        // find the character by id
+        var deletedCharacter = foundBook.characters.id(characterId);
+        // delete the found character
+        deletedCharacter.remove();
+        // save the found book with the character deleted
+        foundBook.save();
+        // send back the found book without the character
+        res.json(foundBook);
+      }
+    });
 });
 
 
 
-
-
 app.listen(process.env.PORT || 3000, function () {
-  console.log('Book app listening at http://localhost:3000/');
+  console.log('Example app listening at http://localhost:3000/');
 });
